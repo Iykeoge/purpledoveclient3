@@ -25,6 +25,7 @@ class EmailService:
         self.fm = FastMail(conf)
 
     async def send_verification_email(self, email: str, token: str, first_name: str):
+        link = f"{settings.DOMAIN}/api/verify-email?token={token}"
         # HTML email template with purple activation button on white background
         html = f"""
         <html>
@@ -33,12 +34,12 @@ class EmailService:
                     <h2 style="color: #4b0082;">Hello {first_name},</h2>
                     <h2 style="color: #4b0082;">Verify Your Email Address</h2>
                     <p>Click the button below to verify your email address and activate your account:</p>
-                    <a href="http://localhost:8000/api/verify-email?token={token}" 
+                    <a href="{link}" 
                     style="display: inline-block; padding: 15px 25px; font-size: 16px; color: #ffffff; background-color: #6A0DAD; text-decoration: none; border-radius: 5px; margin-top: 20px;">
                         Activate Account
                     </a>
                     <p style="margin-top: 20px;">If the button above doesn't work, copy and paste the following link into your browser:</p>
-                    <p><a href="http://localhost:8000/api/verify-email?token={token}" style="color: #6A0DAD;">http://localhost:8000/api/verify-email?token={token}</a></p>
+                    <p><a href="{link}" style="color: #6A0DAD;">{link}</a></p>
                 </div>
             </body>
         </html>
@@ -95,7 +96,3 @@ class PasswordResetMailService:
         # Initialize FastMail and send the email
         fm = FastMail(conf)
         await fm.send_message(message)
-
-
-
-
