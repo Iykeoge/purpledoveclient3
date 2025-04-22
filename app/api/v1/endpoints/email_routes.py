@@ -11,6 +11,7 @@ from app.api.services.email_services import EmailService, PasswordResetMailServi
 from app.api.security.security import create_refresh_token, create_verification_token, verify_password_reset_token, hash_password, create_access_token
 from app.api.schemas.user_schema import ResetPassword, ResetPasswordRequest
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi.responses import RedirectResponse
 
 from app.api.utils.utils import decode_token_skip_active_check
 
@@ -19,18 +20,40 @@ router = APIRouter()
 
 
 
+# @router.get("/verify-email", tags=["auth"])
+# async def verify_email(token: str, db: AsyncSession = Depends(get_db), response: Response = None, user: User = Depends(decode_token)):
+#     # Assuming EmailController.verify_email only handles activation now
+#     await EmailController.verify_email(db, user)
+#     # Create the refresh token
+#     refresh_token = await create_refresh_token({"email": user.email, "first_name": user.first_name})
+    
+#     # Set the tokens as cookies
+#     response.set_cookie(key="access_token", value=token, httponly=True, samesite='Strict')
+#     response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, samesite='Strict')
+    
+#     return {"message": "Email verified successfully"}
+
+
 @router.get("/verify-email", tags=["auth"])
-async def verify_email(token: str, db: AsyncSession = Depends(get_db), response: Response = None, user: User = Depends(decode_token)):
-    # Assuming EmailController.verify_email only handles activation now
+async def verify_email(token: str, db: AsyncSession = Depends(get_db), user: User = Depends(decode_token)):
+    # Activate the user
     await EmailController.verify_email(db, user)
-    # Create the refresh token
+    
+    # Create tokens
+    access_token = await create_access_token({"email": user.email, "first_name": user.first_name})
     refresh_token = await create_refresh_token({"email": user.email, "first_name": user.first_name})
     
-    # Set the tokens as cookies
-    response.set_cookie(key="access_token", value=token, httponly=True, samesite='Strict')
+    # Build the redirect URL
+    redirect_url = f"{settings.FRONTEND_URL}{settings.DASHBOARD_PATH}"
+    
+    # Create redirect response
+    response = RedirectResponse(url=redirect_url)
+    
+    # Set the tokens as cookies in the redirect response
+    response.set_cookie(key="access_token", value=access_token, httponly=True, samesite='Strict')
     response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, samesite='Strict')
     
-    return {"message": "Email verified successfully"}
+    return response
 
 
 

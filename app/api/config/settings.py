@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     SESSION_SECRET_KEY: str
     PAYSTACK_SECRET_KEY:str
     FRAPPE_BASE_URL:str
+    FRONTEND_URL = "https://portal.purpledove.net"
+    DASHBOARD_PATH = "/dashboard"
 
     
     
