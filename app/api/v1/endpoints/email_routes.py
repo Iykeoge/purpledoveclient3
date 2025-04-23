@@ -43,11 +43,11 @@ async def verify_email(token: str, db: AsyncSession = Depends(get_db), user: Use
     access_token = await create_access_token({"email": user.email, "first_name": user.first_name})
     refresh_token = await create_refresh_token({"email": user.email, "first_name": user.first_name})
     
-    # Build the redirect URL
-    redirect_url = f"{settings.FRONTEND_URL}{settings.DASHBOARD_PATH}"
+    # Build the redirect URL as an absolute URL
+    redirect_url = "https://portal.purpledove.net/dashboard"
     
-    # Create redirect response
-    response = RedirectResponse(url=redirect_url)
+    # Set the status code to 303 to ensure proper redirection
+    response = RedirectResponse(url=redirect_url, status_code=303)
     
     # Set the tokens as cookies in the redirect response
     response.set_cookie(key="access_token", value=access_token, httponly=True, samesite='Strict')
