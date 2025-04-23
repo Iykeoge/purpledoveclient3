@@ -44,7 +44,7 @@ async def verify_email(token: str, db: AsyncSession = Depends(get_db), user: Use
     refresh_token = await create_refresh_token({"email": user.email, "first_name": user.first_name})
     
     # Build the redirect URL as an absolute URL
-    redirect_url = "https://portal.purpledove.net/dashboard"
+    redirect_url = "https://portal.purpledove.net/login"
     
     # Set the status code to 303 to ensure proper redirection
     response = RedirectResponse(url=redirect_url, status_code=303)
