@@ -94,7 +94,7 @@ async def signin(db: AsyncSession, user: UserLogin) -> JSONResponse:
     if not existing_user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is inactive. Please contact support."
+            detail="Account is inactive. Please Check Your email to verify your account or contact support."
         )
     
     # Generate JWT tokens
