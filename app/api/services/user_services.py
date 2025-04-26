@@ -75,8 +75,11 @@ async def signup(db: AsyncSession, user: UserCreate) -> str:
     
     return response
 
-    
-    
+ 
+
+
+
+
 
 async def signin(db: AsyncSession, user: UserLogin) -> JSONResponse:
     # Retrieve the user by email
@@ -85,6 +88,13 @@ async def signin(db: AsyncSession, user: UserLogin) -> JSONResponse:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid credentials"
+        )
+    
+    # Check if user is active
+    if not existing_user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is inactive. Please contact support."
         )
     
     # Generate JWT tokens
@@ -125,5 +135,59 @@ async def signin(db: AsyncSession, user: UserLogin) -> JSONResponse:
     )
     
     return response
+
+
+
+
+    
+    
+
+# async def signin(db: AsyncSession, user: UserLogin) -> JSONResponse:
+#     # Retrieve the user by email
+#     existing_user = await get_user_by_email(db, user.email)
+#     if not existing_user or not await verify_password(user.password, existing_user.password):
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail="Invalid credentials"
+#         )
+    
+#     # Generate JWT tokens
+#     token_data = {
+#         "id": str(existing_user.id),
+#         "email": existing_user.email,
+#         "first_name": existing_user.first_name,
+#         "last_name": existing_user.last_name,
+#         "is_active": existing_user.is_active,
+#         "role_id": existing_user.role_id,
+#         # Add more fields if needed
+#     }
+#     access_token = await create_access_token(user_data=token_data)
+#     refresh_token = await create_refresh_token(user_data=token_data)
+    
+#     # Prepare the response
+#     response = JSONResponse(
+#         content={
+#             "message": "Login successful",
+#             "user_data": token_data,
+#         }
+#     )
+    
+#     # Set cookies
+#     response.set_cookie(
+#         key="access_token",
+#         value=access_token,
+#         httponly=True,
+#         secure=True, 
+#         samesite="Strict",
+#     )
+#     response.set_cookie(
+#         key="refresh_token",
+#         value=refresh_token,
+#         httponly=True,
+#         secure=True,
+#         samesite="Strict",
+#     )
+    
+#     return response
 
 
