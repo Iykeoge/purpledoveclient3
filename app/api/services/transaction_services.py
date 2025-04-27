@@ -6,12 +6,11 @@ from app.api.database.db import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.models.site_data import SiteData
 from app.api.models.transactions import UserTransactions
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends
 from app.api.models.user_model import User
 from app.api.security.payment_verification import verify_paystack_transaction
 # from app.api.utils.fr_utils import update_frappe_doctype  # Utility to update Frappe ER
 import httpx
-from typing import Optional
 
 from app.api.utils.frappe_utils import create_frappe_site, store_site_data
 
@@ -29,129 +28,255 @@ from app.api.utils.normalize_site_name import normalize_site_name, validate_site
 
     
 
+
+
+
+
+
+
+
+
+
 async def store_transaction(transaction_data: dict, db: AsyncSession = Depends(get_db)):
     """
-    Store a transaction from the frontend
+    Store a transaction from the frontend, validate it with Paystack, and store the response in the database.
     """
-    # Create a safe copy for logging
-    safe_data = {k: str(v) if isinstance(v, (datetime, uuid.UUID)) else v 
-                for k, v in transaction_data.items()}
+    # Create a safe copy of transaction data for logging
+    safe_data = {
+        k: str(v) if isinstance(v, (datetime, uuid.UUID)) else v 
+        for k, v in transaction_data.items()
+    }
     logging.info(f"Received transaction data: {json.dumps(safe_data, cls=CustomJSONEncoder)}")
     
     try:
-        # Extract plan (case-insensitive)
-        plan = transaction_data.get("plan", "").lower()
-        is_free_plan = plan == "free"
+        # Extract plan early to determine which fields are required
+        plan = transaction_data.get("plan", "")
+        is_free_plan = plan.lower() == "free" if plan else False
         
-        # For Free plans, set default payment values
-        if is_free_plan:
-            transaction_data.setdefault("payment_reference", "free_plan")
-            transaction_data.setdefault("payment_status", "not_applicable")
-            transaction_data.setdefault("transaction_id", 0)
-            transaction_data.setdefault("amount", 0)  # Ensure amount is 0 for free plans
-
-        # Validate required fields (common for all plans)
-        required_fields = [
-            "user_id", "first_name", "last_name", "email", 
-            "phone", "country", "company_name", "site_name",
-            "organization", "quantity", "plan"
-        ]
-        
-        for field in required_fields:
-            if field not in transaction_data:
+        # Extract all fields from transaction data with type validation
+        def get_field(field_name: str, required: bool = True, field_type: type = str, 
+                     free_plan_optional: bool = False) -> Any:
+            """
+            Extract and validate a field from transaction data
+            
+            Args:
+                field_name: Name of the field to extract
+                required: Whether the field is generally required
+                field_type: Expected type of the field
+                free_plan_optional: Whether this field is optional for free plans
+            """
+            value = transaction_data.get(field_name)
+            
+            # If we're on a free plan and this field is optional for free plans
+            field_required = required and not (is_free_plan and free_plan_optional)
+            
+            if value is None and field_required:
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Missing required field: {field}"
+                    status_code=400,
+                    detail=f"Missing required field: {field_name}"
                 )
-
-        # For paid plans, validate payment fields
-        if not is_free_plan:
-            payment_fields = ["payment_reference", "transaction_id", "payment_status"]
-            for field in payment_fields:
-                if field not in transaction_data:
+            
+            if value is not None and not isinstance(value, field_type) and field_type != datetime:
+                try:
+                    value = field_type(value)
+                except (ValueError, TypeError):
                     raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Missing payment field for paid plan: {field}"
+                        status_code=400,
+                        detail=f"Invalid type for {field_name}. Expected {field_type.__name__}"
                     )
+            return value
 
-        # Process the data
-        user_id = uuid.UUID(str(transaction_data["user_id"]))
-        site_name = normalize_site_name(transaction_data["site_name"])
+        # Extract fields with type validation
+        user_id = get_field("user_id", field_type=str)  # Will be converted to UUID later
+        payment_reference = get_field("payment_reference", free_plan_optional=True)
+        plan = get_field("plan")
+        first_name = get_field("first_name")
+        last_name = get_field("last_name")
+        email = get_field("email")
+        payment_status = get_field("payment_status", free_plan_optional=True)
+        phone = get_field("phone")
+        country = get_field("country")
+        company_name = get_field("company_name")
+        organization = get_field("organization")
+        original_site_name = get_field("site_name")
         
+        # Normalize the site name
+        site_name = normalize_site_name(original_site_name)
+        
+        # Validate the normalized site name
         if not validate_site_name(site_name):
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid site name: {site_name}"
+                status_code=400,
+                detail=f"Invalid site name after normalization: {site_name}"
+            )
+            
+        quantity = get_field("quantity", field_type=int)
+        amount = get_field("amount", field_type=float)
+        # We'll ignore valid_from and valid_upto from frontend
+        # These variables are just here for backward compatibility with frontend
+        _ = get_field("valid_from", required=False)
+        _ = get_field("valid_upto", required=False)
+        training_and_setup = get_field("training_and_setup", field_type=bool)
+        transaction_id = get_field("transaction_id", field_type=int, free_plan_optional=True)
+        # Make message optional for all plans
+        message = get_field("message", required=False)
+
+        # Calculate valid_from and valid_upto based on current time and plan
+        valid_from = datetime.now()
+        
+        # Calculate valid_upto based on the plan
+        if plan.lower() in ["standard", "custom"]:
+            # One year from now
+            valid_upto = valid_from + timedelta(days=365)
+        elif plan.lower() == "free":
+            # 14 days (two weeks) from now
+            valid_upto = valid_from + timedelta(days=14)
+        else:
+            # Default to one year for any other plan
+            valid_upto = valid_from + timedelta(days=365)
+            logging.warning(f"Unknown plan type: {plan}, defaulting to 1 year validity")
+
+        # Convert user_id to UUID with error handling
+        try:
+            user_id = uuid.UUID(str(user_id))
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid UUID format for user_id"
             )
 
-        # Calculate validity dates
-        valid_from = datetime.now()
-        valid_upto = valid_from + timedelta(days=14 if is_free_plan else 365)
+        # Verify user exists
+        result = await db.execute(select(User).filter(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            raise HTTPException(
+                status_code=404,
+                detail="User not found"
+            )
+
+        # Skip payment verification for free plan
+        paystack_status = None
+        paystack_response = None
+        
+        if not is_free_plan:
+            # Verify payment with Paystack only for paid plans
+            paystack_status, paystack_response = await verify_paystack_transaction(payment_reference)
+            logging.info(f"Paystack status: {paystack_status}")
+            logging.info(f"Paystack response: {paystack_response}")
+            
+            if paystack_status not in ["success", "failed"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid Paystack transaction status. Please verify your payment reference."
+                )
+
+            # If payment failed, don't proceed with site creation
+            if paystack_status == "failed":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Payment verification failed"
+                )
+        else:
+            # For free plan, set default values
+            paystack_status = "success"  # Assume success for free plan
+            paystack_response = {"message": "Free plan - no payment required"}
+            if payment_status is None:
+                payment_status = "completed"  # Default payment status for free plan
+            if payment_reference is None:
+                payment_reference = f"FREE-{uuid.uuid4()}"  # Generate a fake reference
+            if transaction_id is None:
+                transaction_id = 0  # Default transaction ID
 
         # Create transaction record
-        transaction = UserTransactions(
+        users_transactions = UserTransactions(
             user_id=user_id,
             plan=plan,
-            payment_status=transaction_data.get("payment_status", "not_applicable"),
-            first_name=transaction_data["first_name"],
-            last_name=transaction_data["last_name"],
-            email=transaction_data["email"],
-            phone=transaction_data["phone"],
-            country=transaction_data["country"],
-            company_name=transaction_data["company_name"],
-            organization=transaction_data["organization"],
-            site_name=site_name,
-            quantity=transaction_data["quantity"],
-            amount=float(transaction_data.get("amount", 0)),
+            payment_status=payment_status,
+            first_name=first_name,
+            last_name=last_name,
+            email=email,
+            phone=phone,
+            country=country,
+            company_name=company_name,
+            organization=organization,
+            site_name=site_name,  # Store normalized site name
+            quantity=quantity,
+            amount=amount,
             valid_from=valid_from,
             valid_upto=valid_upto,
-            training_and_setup=bool(transaction_data.get("training_and_setup", False)),
-            payment_reference=transaction_data.get("payment_reference", "free_plan"),
-            transaction_id=int(transaction_data.get("transaction_id", 0)),
-            message=transaction_data.get("message", ""),
-            paystack_status="not_applicable" if is_free_plan else "pending",
-            paystack_response=json.dumps({}) if is_free_plan else None
+            training_and_setup=training_and_setup,
+            payment_reference=payment_reference,
+            transaction_id=transaction_id,
+            message=message if message else None,
+            paystack_status=paystack_status,
+            paystack_response=json.dumps(paystack_response, cls=CustomJSONEncoder) if paystack_response else None,
         )
 
-        db.add(transaction)
+        # Save transaction to database with safe serialization
+        db.add(users_transactions)
         await db.commit()
-        await db.refresh(transaction)
-
-        # Attempt site creation
+        await db.refresh(users_transactions)
+        
         site_creation_response = None
+        
+        # Proceed with site creation for both free and paid plans as long as payment status is success
         try:
+            logging.info("Attempting to create Frappe site...")
+            # Create Frappe site with normalized site name (without storing site data in Frappe)
             site_creation_response = await create_frappe_site(
-                site_name=site_name,
+                site_name=site_name, 
                 plan=plan,
-                quantity=transaction_data["quantity"]
+                quantity=quantity
             )
-            transaction.site_creation_status = "initiated"
+            logging.info(f"Site creation response: {site_creation_response}")
+            
+            # Update transaction with site creation status
+            users_transactions.site_creation_status = "initiated"
             if site_creation_response and "job_id" in site_creation_response:
-                transaction.site_creation_job_id = site_creation_response["job_id"]
+                users_transactions.site_creation_job_id = site_creation_response.get("job_id")
+            
             await db.commit()
+            
+            logging.info(f"Site creation initiated successfully for {site_name}")
+            
         except Exception as e:
-            transaction.site_creation_status = "failed"
-            transaction.site_creation_error = str(e)
+            error_msg = f"Error in site creation process: {str(e)}"
+            logging.error(error_msg)
+            users_transactions.site_creation_status = "failed"
+            users_transactions.site_creation_error = error_msg
             await db.commit()
+            # We don't raise an exception here as the payment was successful
 
+        # Return success response with all relevant data
         return {
             "message": "Transaction stored successfully",
-            "transaction_id": str(transaction.id),
-            "site_name": site_name,
-            "site_creation_status": transaction.site_creation_status
+            "transaction": {
+                "id": str(users_transactions.id),
+                "user_id": str(users_transactions.user_id),
+                "plan": users_transactions.plan,
+                "payment_status": users_transactions.payment_status,
+                "paystack_status": paystack_status,
+                "site_name": users_transactions.site_name,
+                "original_site_name": original_site_name,  # Include the original site name in response
+                "site_creation_status": users_transactions.site_creation_status,
+                "site_creation_job_id": getattr(users_transactions, 'site_creation_job_id', None),
+                "valid_from": valid_from.isoformat(),
+                "valid_upto": valid_upto.isoformat()
+            },
+            "site_creation": site_creation_response if site_creation_response else None
         }
 
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid data format: {str(e)}"
-        )
+    except HTTPException as e:
+        logging.error(f"HTTPException: {e.detail}")
+        raise e
     except Exception as e:
-        logging.error(f"Error storing transaction: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to store transaction"
-        )
+        logging.error(f"Unhandled error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error storing transaction: {str(e)}")
+
+
+
+
+
 
 
 
