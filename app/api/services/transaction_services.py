@@ -46,19 +46,21 @@ async def store_transaction(transaction_data: dict, db: AsyncSession = Depends(g
         is_free_plan = plan.lower() == "free"
         
         # Extract all fields from transaction data with type validation
-        def get_field(field_name: str, required: bool = True, field_type: type = str) -> Any:
-            value = transaction_data.get(field_name)
-            # Skip validation for payment-related fields if it's a free plan
+        def get_field(field_name: str, required: bool = True, field_type: type = str, default: Any = None) -> Any:
+            # For free plan, payment fields are not required
             if is_free_plan and field_name in ["payment_reference", "transaction_id", "payment_status"]:
                 required = False
-                if value is None:
-                    return None
+                if field_name not in transaction_data:
+                    return default
                     
-            if value is None and required:
+            if field_name not in transaction_data and required:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Missing required field: {field_name}"
                 )
+            
+            value = transaction_data.get(field_name, default)
+            
             if value is not None and not isinstance(value, field_type) and field_type != datetime:
                 try:
                     value = field_type(value)
@@ -70,7 +72,7 @@ async def store_transaction(transaction_data: dict, db: AsyncSession = Depends(g
             return value
 
         # Extract fields with type validation
-        user_id = get_field("user_id", field_type=str)  # Will be converted to UUID later
+        user_id = get_field("user_id", field_type=str)
         first_name = get_field("first_name")
         last_name = get_field("last_name")
         email = get_field("email")
@@ -82,19 +84,18 @@ async def store_transaction(transaction_data: dict, db: AsyncSession = Depends(g
         quantity = get_field("quantity", field_type=int)
         amount = get_field("amount", field_type=float)
         
-        # Payment-related fields - could be optional for free plan
-        payment_reference = get_field("payment_reference", required=(not is_free_plan))
-        payment_status = get_field("payment_status", required=(not is_free_plan))
-        transaction_id = get_field("transaction_id", required=(not is_free_plan), field_type=int)
+        # Payment-related fields - optional for free plan
+        payment_reference = get_field("payment_reference", required=(not is_free_plan), default="free_plan")
+        payment_status = get_field("payment_status", required=(not is_free_plan), default="not_applicable")
+        transaction_id = get_field("transaction_id", required=(not is_free_plan), field_type=int, default=0)
         
         # Message is required regardless of plan
-        message = get_field("message")
+        message = get_field("message", required=False, default="")  # Making message optional
         
-        # We'll ignore valid_from and valid_upto from frontend
-        # These variables are just here for backward compatibility with frontend
-        _ = get_field("valid_from", required=False)
-        _ = get_field("valid_upto", required=False)
-        training_and_setup = get_field("training_and_setup", field_type=bool)
+        # These are optional fields from frontend
+        valid_from_str = get_field("valid_from", required=False)
+        valid_upto_str = get_field("valid_upto", required=False)
+        training_and_setup = get_field("training_and_setup", field_type=bool, default=False)
 
         # Normalize the site name
         site_name = normalize_site_name(original_site_name)
@@ -139,11 +140,10 @@ async def store_transaction(transaction_data: dict, db: AsyncSession = Depends(g
                 detail="User not found"
             )
 
-        # Initialize Paystack verification variables
+        # For free plan, skip Paystack verification
         paystack_status = "not_applicable"
         paystack_response = {}
         
-        # Skip Paystack verification for free plan, verify payment otherwise
         if not is_free_plan:
             paystack_status, paystack_response = await verify_paystack_transaction(payment_reference)
             logging.info(f"Paystack status: {paystack_status}")
@@ -155,17 +155,12 @@ async def store_transaction(transaction_data: dict, db: AsyncSession = Depends(g
                     detail="Invalid Paystack transaction status. Please verify your payment reference."
                 )
 
-            # If payment failed, don't proceed with site creation
             if paystack_status == "failed":
                 raise HTTPException(
                     status_code=400,
                     detail="Payment verification failed"
                 )
         else:
-            # For free plan, set default values
-            payment_status = payment_status or "not_applicable"
-            payment_reference = payment_reference or "free_plan"
-            transaction_id = transaction_id or 0
             logging.info(f"Free plan selected, skipping payment verification")
 
         # Create transaction record
@@ -180,7 +175,7 @@ async def store_transaction(transaction_data: dict, db: AsyncSession = Depends(g
             country=country,
             company_name=company_name,
             organization=organization,
-            site_name=site_name,  # Store normalized site name
+            site_name=site_name,
             quantity=quantity,
             amount=amount,
             valid_from=valid_from,
@@ -193,17 +188,14 @@ async def store_transaction(transaction_data: dict, db: AsyncSession = Depends(g
             paystack_response=json.dumps(paystack_response, cls=CustomJSONEncoder),
         )
 
-        # Save transaction to database with safe serialization
         db.add(users_transactions)
         await db.commit()
         await db.refresh(users_transactions)
         
         site_creation_response = None
         
-        # Create Frappe site for both paid and free plans
         try:
             logging.info("Attempting to create Frappe site...")
-            # Create Frappe site with normalized site name (without storing site data in Frappe)
             site_creation_response = await create_frappe_site(
                 site_name=site_name, 
                 plan=plan,
@@ -211,13 +203,11 @@ async def store_transaction(transaction_data: dict, db: AsyncSession = Depends(g
             )
             logging.info(f"Site creation response: {site_creation_response}")
             
-            # Update transaction with site creation status
             users_transactions.site_creation_status = "initiated"
             if site_creation_response and "job_id" in site_creation_response:
                 users_transactions.site_creation_job_id = site_creation_response.get("job_id")
             
             await db.commit()
-            
             logging.info(f"Site creation initiated successfully for {site_name}")
             
         except Exception as e:
@@ -226,9 +216,7 @@ async def store_transaction(transaction_data: dict, db: AsyncSession = Depends(g
             users_transactions.site_creation_status = "failed"
             users_transactions.site_creation_error = error_msg
             await db.commit()
-            # We don't raise an exception here as the transaction was recorded
 
-        # Return success response with all relevant data
         return {
             "message": "Transaction stored successfully",
             "transaction": {
@@ -238,7 +226,7 @@ async def store_transaction(transaction_data: dict, db: AsyncSession = Depends(g
                 "payment_status": users_transactions.payment_status,
                 "paystack_status": paystack_status,
                 "site_name": users_transactions.site_name,
-                "original_site_name": original_site_name,  # Include the original site name in response
+                "original_site_name": original_site_name,
                 "site_creation_status": users_transactions.site_creation_status,
                 "site_creation_job_id": getattr(users_transactions, 'site_creation_job_id', None),
                 "valid_from": valid_from.isoformat(),
