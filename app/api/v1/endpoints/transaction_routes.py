@@ -28,20 +28,20 @@ secret_key = PAYSTACK_SECRET_KEY
 
 router = APIRouter()
 
+
+
+
+# Update route to handle the model
 @router.post("/store-transaction", tags=["transaction"])
 async def store_transactions_payload(transaction_data: TransactionPayload,
     db: AsyncSession = Depends(get_db)):
     """
     Endpoint to store the transaction payload
     """
-    return await store_transaction(transaction_data.model_dump(), db) 
+    return await store_transaction(transaction_data.model_dump(), db)
 
 
-# @router.post("/webhook/site-creation")
-# async def site_creation_webhook(data: dict):
-#     # Handle the webhook data
-#     print("4444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444", data)
-#     return {"status": "received"}
+
 
 
 
@@ -276,36 +276,6 @@ async def paystack_webhook(request: Request, db: AsyncSession = Depends(get_db))
 
 
 
-
-
-# @router.get("/get-transactions/{user_id}", response_model=List[dict])
-# async def fetch_user_transactions(user_id: str, db: AsyncSession = Depends(get_db)):
-#     """
-#     Fetch all transactions for a specific user based on user_id with active sites.
-#     Path parameter:
-#     - user_id: The ID of the user whose transactions to fetch
-#     """
-#     transactions_with_sites = await get_transactions_by_user_id(user_id, db)
-#     return [
-#         {
-#             "id": transaction.id,
-#             "user_id": str(transaction.user_id),
-#             "plan": transaction.plan,
-#             "payment_status": transaction.payment_status,
-#             "amount": transaction.amount,
-#             "site_name": transaction.site_name,
-#             "active_sites": active_sites,
-#             "number_of_users": transaction.quantity,
-#             "payment_reference": transaction.payment_reference,
-#             "transaction_id": transaction.transaction_id,
-#             "valid_from": transaction.valid_from,
-#             "valid_upto": transaction.valid_upto,
-#             "paystack_status": transaction.paystack_status,
-#             "created_at": transaction.created_at,
-#         }
-#         for transaction, active_sites in transactions_with_sites
-#     ]
-
 @router.get("/get-transactions/{user_id}", response_model=List[dict])
 async def fetch_user_transactions(user_id: str, db: AsyncSession = Depends(get_db)):
     """
@@ -494,3 +464,59 @@ async def fetch_transaction(transaction_id: str, db: AsyncSession = Depends(get_
 #     except Exception as e:
 #         logging.error(f"Error handling Paystack webhook: {str(e)}")
 #         raise HTTPException(status_code=500, detail="Error processing Paystack webhook")
+
+
+
+
+
+
+
+
+# @router.post("/store-transaction", tags=["transaction"])
+# async def store_transactions_payload(transaction_data: TransactionPayload,
+#     db: AsyncSession = Depends(get_db)):
+#     """
+#     Endpoint to store the transaction payload
+#     """
+#     return await store_transaction(transaction_data.model_dump(), db) 
+
+
+# @router.post("/webhook/site-creation")
+# async def site_creation_webhook(data: dict):
+#     # Handle the webhook data
+#     print("4444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444", data)
+#     return {"status": "received"}
+
+
+
+
+
+
+
+# @router.get("/get-transactions/{user_id}", response_model=List[dict])
+# async def fetch_user_transactions(user_id: str, db: AsyncSession = Depends(get_db)):
+#     """
+#     Fetch all transactions for a specific user based on user_id with active sites.
+#     Path parameter:
+#     - user_id: The ID of the user whose transactions to fetch
+#     """
+#     transactions_with_sites = await get_transactions_by_user_id(user_id, db)
+#     return [
+#         {
+#             "id": transaction.id,
+#             "user_id": str(transaction.user_id),
+#             "plan": transaction.plan,
+#             "payment_status": transaction.payment_status,
+#             "amount": transaction.amount,
+#             "site_name": transaction.site_name,
+#             "active_sites": active_sites,
+#             "number_of_users": transaction.quantity,
+#             "payment_reference": transaction.payment_reference,
+#             "transaction_id": transaction.transaction_id,
+#             "valid_from": transaction.valid_from,
+#             "valid_upto": transaction.valid_upto,
+#             "paystack_status": transaction.paystack_status,
+#             "created_at": transaction.created_at,
+#         }
+#         for transaction, active_sites in transactions_with_sites
+#     ]
