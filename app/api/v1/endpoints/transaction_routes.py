@@ -88,7 +88,7 @@ async def site_creation_webhook(data: dict, db: AsyncSession = Depends(get_db)):
                 "organization": transaction.organization,
                 "site_name": transaction.site_name,
                 "quantity": transaction.quantity,
-                "amount": transaction.amount,
+                "amount": transaction.amount if transaction.amount is not None else 0,
                 "training_and_setup": transaction.training_and_setup,
                 "payment_reference": transaction.payment_reference,
                 "payment_status": transaction.payment_status,
