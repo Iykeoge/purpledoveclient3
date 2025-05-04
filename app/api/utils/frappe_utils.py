@@ -55,9 +55,14 @@ async def store_site_data(site_data):
     
 
 
+
+
+
+
+
+
 async def create_frappe_site(site_name: str, plan: str, quantity: int):
     # Create a new Frappe site using the existing site creation endpoint.
-  
     
     # Ensure site name ends with .purpledove.net
     if not site_name.endswith('erp.staging.purpledove.net'):
@@ -71,25 +76,119 @@ async def create_frappe_site(site_name: str, plan: str, quantity: int):
     
     headers = {
         "Content-Type": "application/json",
-        "Expect": ""
+        "Expect": ""  # Explicitly disable the Expect header
     }
 
     try:
         logging.info(f"Initiating Frappe site creation for: {site_name}")
-        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+        
+        # Create a transport that explicitly disables HTTP/2
+        transport = httpx.AsyncHTTPTransport(http2=False)
+        
+        # Use the transport with more explicit options
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0),
+            transport=transport,
+            follow_redirects=True
+        ) as client:
+            # Log the request we're about to make
+            logging.info(f"Sending request to {FRAPPE_SITE_CREATE_ENDPOINT} with data: {site_data}")
+            
             response = await client.post(
                 f"{FRAPPE_SITE_CREATE_ENDPOINT}",
                 json=site_data,
                 headers=headers
             )
-            response.raise_for_status()
+            
+            # Log response status and headers
+            logging.info(f"Response status: {response.status_code}")
+            logging.info(f"Response headers: {response.headers}")
+            
+            # Handle non-200 responses more gracefully
+            if response.status_code != 200:
+                response_text = response.text
+                logging.error(f"Non-200 response: {response.status_code}, Body: {response_text}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to create Frappe site: Server returned {response.status_code}: {response_text}"
+                )
+                
             return response.json()
+    except httpx.RequestError as e:
+        # Handle connection errors specifically
+        logging.error(f"Request error creating Frappe site: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Connection error while creating Frappe site: {str(e)}"
+        )
     except Exception as e:
         logging.error(f"Error creating Frappe site: {str(e)}")
+        logging.error(f"Error traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to create Frappe site: {str(e)}"
         )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# async def create_frappe_site(site_name: str, plan: str, quantity: int):
+#     # Create a new Frappe site using the existing site creation endpoint.
+  
+    
+#     # Ensure site name ends with .purpledove.net
+#     if not site_name.endswith('erp.staging.purpledove.net'):
+#         site_name = f"{site_name}erp.staging.purpledove.net"
+    
+#     site_data = {
+#         "site_name": site_name,
+#         "plan": plan,
+#         "user_count": quantity
+#     }
+    
+#     headers = {
+#         "Content-Type": "application/json",
+#         "Expect": ""
+#     }
+
+#     try:
+#         logging.info(f"Initiating Frappe site creation for: {site_name}")
+#         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+#             response = await client.post(
+#                 f"{FRAPPE_SITE_CREATE_ENDPOINT}",
+#                 json=site_data,
+#                 headers=headers
+#             )
+#             response.raise_for_status()
+#             return response.json()
+#     except Exception as e:
+#         logging.error(f"Error creating Frappe site: {str(e)}")
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"Failed to create Frappe site: {str(e)}"
+#         )
+
         
         
         
