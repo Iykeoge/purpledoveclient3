@@ -70,7 +70,8 @@ async def create_frappe_site(site_name: str, plan: str, quantity: int):
     }
     
     headers = {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Expect": ""
     }
 
     try:
