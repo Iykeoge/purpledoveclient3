@@ -1,4 +1,5 @@
 import json
+import traceback
 from fastapi import HTTPException
 import httpx
 import logging

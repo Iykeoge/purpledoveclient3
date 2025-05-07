@@ -17,9 +17,10 @@ import json
 load_dotenv()
 
 
-
+#https://api.paystack.co/transaction/verify/
 
 PAYSTACK_SECRET_KEY = os.getenv("PAYSTACK_SECRET_KEY")
+PAYSTACK_URL = os.getenv('PAYSTACK_URL')
 
 
 
@@ -102,7 +103,7 @@ async def verify_paystack_transaction(payment_reference: str):
     Raises:
         HTTPException: If the Paystack verification fails or returns unauthorized.
     """
-    paystack_url = f"https://api.paystack.co/transaction/verify/{payment_reference}"
+    paystack_url = f"PAYSTACK_URL{payment_reference}"
     headers = {
         "Authorization": f"Bearer {PAYSTACK_SECRET_KEY}",
         "Content-Type": "application/json",

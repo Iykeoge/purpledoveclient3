@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     FRAPPE_BASE_URL:str
     FRONTEND_URL:str
     DASHBOARD_PATH:str
+    PAYSTACK_URL:str
 
     
     
